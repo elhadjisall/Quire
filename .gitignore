@@ -1,0 +1,9 @@
+/kvdb
+/bin/
+/data/
+*.db
+*.db-journal
+*.test
+*.out
+.idea/
+.vscode/
