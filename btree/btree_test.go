@@ -166,3 +166,55 @@ func TestGet(t *testing.T) {
 		t.Fatalf("found missing key")
 	}
 }
+
+func TestIterator(t *testing.T) {
+	m := newMemTree()
+	for i := 0; i < 3000; i++ {
+		m.add(fmt.Sprintf("%05d", i*2), "x")
+	}
+	// forward scan from a key that exists
+	it := m.tree.Seek([]byte("01000"), CmpGE)
+	for i := 500; i < 3000; i++ {
+		if !it.Valid() {
+			t.Fatalf("iterator ended early at %d", i)
+		}
+		k, _ := it.Deref()
+		if string(k) != fmt.Sprintf("%05d", i*2) {
+			t.Fatalf("got %s want %05d", k, i*2)
+		}
+		it.Next()
+	}
+	if it.Valid() {
+		t.Fatalf("iterator should be exhausted")
+	}
+	// GT skips an existing key
+	it = m.tree.Seek([]byte("01000"), CmpGT)
+	k, _ := it.Deref()
+	if string(k) != "01002" {
+		t.Fatalf("GT got %s", k)
+	}
+	// LT of a missing key lands on the predecessor
+	it = m.tree.Seek([]byte("01001"), CmpLT)
+	k, _ = it.Deref()
+	if string(k) != "01000" {
+		t.Fatalf("LT got %s", k)
+	}
+	// backwards scan to the start
+	it = m.tree.Seek([]byte("00010"), CmpLE)
+	for i := 5; i >= 0; i-- {
+		k, _ := it.Deref()
+		if !it.Valid() || string(k) != fmt.Sprintf("%05d", i*2) {
+			t.Fatalf("prev scan got %s want %05d", k, i*2)
+		}
+		it.Prev()
+	}
+	if it.Valid() {
+		t.Fatalf("iterator should be before the start")
+	}
+	// first
+	it = m.tree.SeekFirst()
+	k, _ = it.Deref()
+	if string(k) != "00000" {
+		t.Fatalf("first got %s", k)
+	}
+}
