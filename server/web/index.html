@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kvdb console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%236d5dfc'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='monospace'>kv</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">kv</div>
+      <div>
+        <div class="brand-name">kvdb</div>
+        <div class="brand-sub" id="db-path">loading…</div>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <span>Tables</span>
+      <button class="icon-btn" id="refresh-tables" title="Refresh">&#x21bb;</button>
+    </div>
+    <div id="table-list" class="table-list"><div class="muted">No tables yet</div></div>
+
+    <div class="section-title"><span>Snippets</span></div>
+    <div class="snippets" id="snippets"></div>
+
+    <div class="section-title"><span>Storage</span></div>
+    <div class="stats" id="stats">
+      <div class="stat"><span class="stat-k">pages</span><span class="stat-v" id="s-pages">–</span></div>
+      <div class="stat"><span class="stat-k">free</span><span class="stat-v" id="s-free">–</span></div>
+      <div class="stat"><span class="stat-k">version</span><span class="stat-v" id="s-version">–</span></div>
+      <div class="stat"><span class="stat-k">size</span><span class="stat-v" id="s-size">–</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="toolbar">
+      <div class="tabs" id="tabs"></div>
+      <div class="toolbar-right">
+        <span class="hint">Ctrl/⌘ + Enter to run</span>
+        <button class="btn ghost" id="clear-btn">Clear</button>
+        <button class="btn primary" id="run-btn">Run&nbsp;▶</button>
+      </div>
+    </header>
+
+    <section class="editor-wrap">
+      <div class="gutter" id="gutter">1</div>
+      <textarea id="editor" spellcheck="false" placeholder="-- write SQL here, e.g.
+SELECT * FROM users WHERE age >= 30 LIMIT 20;"></textarea>
+    </section>
+
+    <section class="results" id="results">
+      <div class="empty">
+        <div class="empty-icon">⌁</div>
+        <div>Run a statement to see results here.</div>
+        <div class="muted">Each run executes inside one transaction; failures roll back everything.</div>
+      </div>
+    </section>
+
+    <footer class="history-bar">
+      <span class="section-title-inline">History</span>
+      <div class="history" id="history"></div>
+    </footer>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
