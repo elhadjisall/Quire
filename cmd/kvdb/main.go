@@ -4,11 +4,13 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/elhadjisall/kvdb/db"
+	"github.com/elhadjisall/kvdb/server"
 	"github.com/elhadjisall/kvdb/sql"
 )
 
@@ -17,6 +19,7 @@ const usage = `kvdb - a tiny relational database built on a copy-on-write B+tree
 usage:
   kvdb shell <file.db>              interactive SQL shell
   kvdb exec  <file.db> "<sql>"      run a script and print the results
+  kvdb serve <file.db> [-addr :7070] start the HTTP API and web console
 `
 
 func main() {
@@ -41,6 +44,14 @@ func main() {
 		results, err := sql.Run(database, strings.Join(os.Args[3:], " "))
 		printResults(results)
 		if err != nil {
+			fail(err)
+		}
+	case "serve":
+		fs := flag.NewFlagSet("serve", flag.ExitOnError)
+		addr := fs.String("addr", ":7070", "listen address")
+		fs.Parse(os.Args[3:])
+		fmt.Printf("kvdb console on http://localhost%s  (database: %s)\n", *addr, path)
+		if err := server.ListenAndServe(*addr, database); err != nil {
 			fail(err)
 		}
 	default:
