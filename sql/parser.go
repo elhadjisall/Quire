@@ -39,15 +39,16 @@ type Assign struct {
 
 // Stmt is a parsed statement.
 type Stmt struct {
-	Kind  int
-	Table string
-	Def   *db.TableDef // CREATE
-	Cols  []string     // INSERT columns / SELECT columns (nil = *)
-	Rows  [][]db.Value // INSERT values
-	Where []Cond
-	Set   []Assign
-	Limit int // 0 = unlimited
-	Desc  bool
+	Kind    int
+	Table   string
+	Def     *db.TableDef // CREATE
+	Cols    []string     // INSERT columns / SELECT columns (nil = *)
+	Rows    [][]db.Value // INSERT values
+	Where   []Cond
+	Set     []Assign
+	Limit   int // 0 = unlimited
+	Desc    bool
+	Explain bool
 }
 
 type parser struct {
@@ -159,6 +160,8 @@ func Parse(input string) ([]*Stmt, error) {
 
 func (p *parser) statement() (*Stmt, error) {
 	switch {
+	case p.keyword("EXPLAIN"):
+		return p.explain()
 	case p.keyword("CREATE"):
 		return p.create()
 	case p.keyword("DROP"):
@@ -197,6 +200,20 @@ func (p *parser) statement() (*Stmt, error) {
 		return &Stmt{Kind: StmtDescribe, Table: name}, err
 	}
 	return nil, p.errorf("unknown statement")
+}
+
+func (p *parser) explain() (*Stmt, error) {
+	st, err := p.statement()
+	if err != nil {
+		return nil, err
+	}
+	switch st.Kind {
+	case StmtSelect, StmtUpdate, StmtDelete:
+	default:
+		return nil, fmt.Errorf("EXPLAIN does not support this statement")
+	}
+	st.Explain = true
+	return st, nil
 }
 
 func (p *parser) create() (*Stmt, error) {

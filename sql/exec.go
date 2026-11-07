@@ -29,6 +29,9 @@ func Run(database *db.DB, script string) ([]*Result, error) {
 	}
 	writes := false
 	for _, st := range stmts {
+		if st.Explain {
+			continue
+		}
 		switch st.Kind {
 		case StmtSelect, StmtShowTables, StmtDescribe, StmtShowIndex:
 		default:
@@ -57,6 +60,9 @@ func Run(database *db.DB, script string) ([]*Result, error) {
 
 // Exec runs a single statement inside tx.
 func Exec(tx *db.Tx, st *Stmt) (*Result, error) {
+	if st.Explain {
+		return explain(tx, st)
+	}
 	switch st.Kind {
 	case StmtCreate:
 		if err := tx.CreateTable(st.Def); err != nil {
@@ -94,6 +100,24 @@ func Exec(tx *db.Tx, st *Stmt) (*Result, error) {
 		return deleteRows(tx, st)
 	}
 	return nil, fmt.Errorf("unsupported statement")
+}
+
+func explain(tx *db.Tx, st *Stmt) (*Result, error) {
+	def, err := tx.Table(st.Table)
+	if err != nil {
+		return nil, err
+	}
+	p, err := buildPlan(def, st.Where, st.Desc)
+	if err != nil {
+		return nil, err
+	}
+	return &Result{
+		Statement: "EXPLAIN",
+		Columns:   []string{"plan"},
+		Rows:      [][]any{{p.desc}},
+		Affected:  1,
+		Plan:      p.desc,
+	}, nil
 }
 
 func showTables(tx *db.Tx) (*Result, error) {

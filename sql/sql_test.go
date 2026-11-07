@@ -143,6 +143,22 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestExplain(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id)); INSERT INTO t VALUES (1, 'a');`)
+	res := mustRun(t, d, `EXPLAIN SELECT * FROM t WHERE id = 1`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != "primary key lookup" {
+		t.Fatalf("explain select: %+v", res[0])
+	}
+	res = mustRun(t, d, `EXPLAIN DELETE FROM t WHERE id = 1; SELECT * FROM t`)
+	if res[0].Rows[0][0] != "primary key lookup" || len(res[1].Rows) != 1 {
+		t.Fatalf("explain delete mutated the table: %+v %+v", res[0], res[1])
+	}
+	if _, err := Parse(`EXPLAIN CREATE TABLE u (id INT64, PRIMARY KEY (id))`); err == nil {
+		t.Fatal("explain create should fail")
+	}
+}
+
 func TestShowIndex(t *testing.T) {
 	d := openTemp(t)
 	mustRun(t, d, `CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id), INDEX (name))`)
