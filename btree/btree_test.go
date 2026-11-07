@@ -218,3 +218,43 @@ func TestIterator(t *testing.T) {
 		t.Fatalf("first got %s", k)
 	}
 }
+
+func TestStats(t *testing.T) {
+	m := newMemTree()
+	if s := m.tree.Stats(); s.Keys != 0 || s.Height != 0 || s.Leaves != 0 {
+		t.Fatalf("empty stats: %+v", s)
+	}
+	for i := 0; i < 100; i++ {
+		m.add(fmt.Sprintf("%04d", i), "v")
+	}
+	s := m.tree.Stats()
+	if s.Keys != 100 || s.Leaves < 1 || s.Height < 1 {
+		t.Fatalf("stats: %+v", s)
+	}
+	kind, nkeys, used, ok := Describe(m.tree.Get(m.tree.Root))
+	if !ok || (kind != "leaf" && kind != "internal") || nkeys < 1 || used <= Header {
+		t.Fatalf("describe root: %s keys=%d used=%d ok=%v", kind, nkeys, used, ok)
+	}
+	if _, _, _, ok := Describe([]byte{0, 0, 0, 0}); ok {
+		t.Fatal("short page should not describe")
+	}
+
+	m = newMemTree()
+	for i := 0; i < 40; i++ {
+		m.add(fmt.Sprintf("k%03d", i), string(make([]byte, 800)))
+	}
+	s = m.tree.Stats()
+	if s.Keys != 40 || s.Height < 2 || s.Internal < 1 || s.Leaves < 2 {
+		t.Fatalf("tall tree: %+v", s)
+	}
+	seen := 0
+	m.tree.Walk(func(ptr uint64, kind string, nkeys, used int) {
+		if ptr == 0 || nkeys < 1 || used > PageSize || (kind != "leaf" && kind != "internal") {
+			t.Fatalf("walk node ptr=%d kind=%s keys=%d used=%d", ptr, kind, nkeys, used)
+		}
+		seen++
+	})
+	if seen != s.Internal+s.Leaves {
+		t.Fatalf("walked %d nodes, stats has %d", seen, s.Internal+s.Leaves)
+	}
+}
