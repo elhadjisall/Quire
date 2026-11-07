@@ -23,7 +23,9 @@ func (db *DB) BeginRead() *Tx { return &Tx{db: db, ro: db.kv.BeginRead()} }
 // Commit persists the changes (no-op for read-only transactions).
 func (tx *Tx) Commit() error {
 	if tx.rw != nil {
-		return tx.rw.Commit()
+		err := tx.rw.Commit()
+		tx.db.clearCache()
+		return err
 	}
 	tx.ro.Close()
 	return nil
@@ -33,9 +35,10 @@ func (tx *Tx) Commit() error {
 func (tx *Tx) Rollback() {
 	if tx.rw != nil {
 		tx.rw.Abort()
-	} else {
-		tx.ro.Close()
+		tx.db.clearCache()
+		return
 	}
+	tx.ro.Close()
 }
 
 func (tx *Tx) reader() reader {
@@ -142,4 +145,57 @@ func (tx *Tx) Scan(table string, sc *Scanner) error {
 		return err
 	}
 	return scanInit(tx.reader(), def, sc)
+}
+
+// CreateIndex builds a secondary index over the rows already in the table.
+func (tx *Tx) CreateIndex(table string, cols []string) error {
+	w, err := tx.writer()
+	if err != nil {
+		return err
+	}
+	def, err := tx.Table(table)
+	if err != nil {
+		return err
+	}
+	return tx.db.createIndex(w, def, cols)
+}
+
+// DropIndex removes a secondary index and its entries.
+func (tx *Tx) DropIndex(table string, cols []string) error {
+	w, err := tx.writer()
+	if err != nil {
+		return err
+	}
+	def, err := tx.Table(table)
+	if err != nil {
+		return err
+	}
+	return tx.db.dropIndex(w, def, cols)
+}
+
+// Indexes lists the primary key and every secondary index.
+// An empty table name lists every user table.
+func (tx *Tx) Indexes(table string) ([]IndexInfo, error) {
+	if table != "" {
+		def, err := tx.Table(table)
+		if err != nil {
+			return nil, err
+		}
+		return listIndexes([]*TableDef{def}), nil
+	}
+	defs, err := tx.Tables()
+	if err != nil {
+		return nil, err
+	}
+	return listIndexes(defs), nil
+}
+
+// IndexEntries reads the ordered keys of a primary key or secondary index.
+// limit <= 0 means no limit.
+func (tx *Tx) IndexEntries(table string, cols []string, limit int) ([]string, [][]Value, error) {
+	def, err := tx.Table(table)
+	if err != nil {
+		return nil, nil, err
+	}
+	return indexEntries(tx.reader(), def, cols, limit)
 }

@@ -231,3 +231,113 @@ func TestNegativeIntsOrder(t *testing.T) {
 		i++
 	}
 }
+
+func TestCreateDropIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "idx.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if err := tx.CreateTable(&TableDef{
+		Name: "t", Types: []uint32{TypeInt64, TypeBytes, TypeInt64},
+		Cols: []string{"id", "name", "age"}, PKeys: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		rec := (&Record{}).AddInt64("id", int64(i)).AddStr("name", []byte(fmt.Sprintf("n%02d", i))).AddInt64("age", int64(i))
+		if _, err := tx.Insert("t", *rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.CreateIndex("t", []string{"name"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Insert("t", *(&Record{}).AddInt64("id", 100).AddStr("name", []byte("n99")).AddInt64("age", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.CreateIndex("t", []string{"name"}); err == nil {
+		t.Fatal("duplicate index should fail")
+	}
+	if err := tx.CreateIndex("t", []string{"missing"}); err == nil {
+		t.Fatal("unknown column should fail")
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	check := func(db *DB) {
+		t.Helper()
+		r := db.BeginRead()
+		defer r.Rollback()
+		def, err := r.Table("t")
+		if err != nil || len(def.Indexes) != 1 || def.Indexes[0][0] != "name" {
+			t.Fatalf("def after commit: %+v %v", def, err)
+		}
+		cols, rows, err := r.IndexEntries("t", []string{"name"}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cols) != 2 || cols[0] != "name" || cols[1] != "id" || len(rows) != 21 {
+			t.Fatalf("entries cols=%v rows=%d", cols, len(rows))
+		}
+		if rows[0][0].String() != "n00" || rows[20][0].String() != "n99" || rows[20][1].I64 != 100 {
+			t.Fatalf("order: first %v last %v", rows[0], rows[20])
+		}
+		sc := Scanner{Cmp1: btree.CmpGE, Cmp2: btree.CmpLE,
+			Key1: *(&Record{}).AddStr("name", []byte("n99")),
+			Key2: *(&Record{}).AddStr("name", []byte("n99"))}
+		if err := r.Scan("t", &sc); err != nil || !sc.Valid() {
+			t.Fatalf("index scan: %v valid=%v", err, sc.Valid())
+		}
+	}
+	check(db)
+	db.Close()
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	check(db)
+
+	w := db.Begin()
+	if err := w.DropIndex("t", []string{"name"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.DropIndex("t", []string{"name"}); err == nil {
+		t.Fatal("dropped index still present")
+	}
+	if err := w.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	r := db.BeginRead()
+	sc := Scanner{Cmp1: btree.CmpGE, Cmp2: btree.CmpLE,
+		Key1: *(&Record{}).AddStr("name", []byte("n00")),
+		Key2: *(&Record{}).AddStr("name", []byte("n00"))}
+	if err := r.Scan("t", &sc); err == nil {
+		t.Fatal("scan should not use a dropped index")
+	}
+	if _, rows, err := r.IndexEntries("t", []string{"id"}, 0); err != nil || len(rows) != 21 {
+		t.Fatalf("primary entries: %d %v", len(rows), err)
+	}
+	info, err := r.Indexes("t")
+	if err != nil || len(info) != 1 || info[0].Kind != "PRIMARY" {
+		t.Fatalf("indexes: %+v %v", info, err)
+	}
+	r.Rollback()
+
+	w = db.Begin()
+	if err := w.CreateIndex("t", []string{"age"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	r = db.BeginRead()
+	defer r.Rollback()
+	cols, rows, err := r.IndexEntries("t", []string{"age"}, 5)
+	if err != nil || len(rows) != 5 || cols[0] != "age" || rows[0][0].I64 != 0 {
+		t.Fatalf("age index: cols=%v rows=%v err=%v", cols, rows, err)
+	}
+}

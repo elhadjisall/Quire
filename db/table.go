@@ -215,28 +215,18 @@ func (db *DB) createTable(tx *kv.Tx, def *TableDef) error {
 	if ok, _ := dbGet(tx, tdefTable, exists); ok {
 		return fmt.Errorf("db: table %q already exists", def.Name)
 	}
-	// allocate prefixes from @meta
-	prefix := uint32(tablePrefixMin)
-	meta := (&Record{}).AddStr("key", []byte("next_prefix"))
-	if ok, _ := dbGet(tx, tdefMeta, meta); ok {
-		prefix = binary.LittleEndian.Uint32(meta.Get("val").Str)
-	} else {
-		meta.AddStr("val", nil)
+	base, err := db.allocPrefix(tx, 1+uint32(len(def.Indexes)))
+	if err != nil {
+		return err
 	}
-	def.Prefix = prefix
+	def.Prefix = base
 	def.IndexPrefixes = make([]uint32, len(def.Indexes))
 	for i := range def.Indexes {
-		def.IndexPrefixes[i] = prefix + 1 + uint32(i)
-	}
-	next := make([]byte, 4)
-	binary.LittleEndian.PutUint32(next, prefix+1+uint32(len(def.Indexes)))
-	meta.Get("val").Str = next
-	if _, err := dbUpdate(tx, tdefMeta, *meta, ModeUpsert); err != nil {
-		return err
+		def.IndexPrefixes[i] = base + 1 + uint32(i)
 	}
 	encoded, _ := json.Marshal(def)
 	row := (&Record{}).AddStr("name", []byte(def.Name)).AddStr("def", encoded)
-	_, err := dbUpdate(tx, tdefTable, *row, ModeInsertOnly)
+	_, err = dbUpdate(tx, tdefTable, *row, ModeInsertOnly)
 	return err
 }
 
@@ -244,19 +234,7 @@ func (db *DB) createTable(tx *kv.Tx, def *TableDef) error {
 func (db *DB) dropTable(tx *kv.Tx, def *TableDef) error {
 	prefixes := append([]uint32{def.Prefix}, def.IndexPrefixes...)
 	for _, p := range prefixes {
-		start := make([]byte, 4)
-		binary.BigEndian.PutUint32(start, p)
-		var keys [][]byte
-		for it := tx.Seek(start, btree.CmpGE); it.Valid(); it.Next() {
-			k, _ := it.Deref()
-			if binary.BigEndian.Uint32(k) != p {
-				break
-			}
-			keys = append(keys, append([]byte(nil), k...))
-		}
-		for _, k := range keys {
-			tx.Del(k)
-		}
+		deletePrefix(tx, p)
 	}
 	rec := (&Record{}).AddStr("name", []byte(def.Name))
 	if _, err := dbDelete(tx, tdefTable, *rec); err != nil {
