@@ -377,7 +377,7 @@ func matches(rec *db.Record, filters []Cond) bool {
 }
 
 // scanRows runs the plan and calls fn for each matching row.
-func scanRows(tx *db.Tx, table string, conds []Cond, desc bool, limit int, fn func(*db.Record) error) (string, error) {
+func scanRows(tx *db.Tx, table string, conds []Cond, desc bool, offset, limit int, fn func(*db.Record) error) (string, error) {
 	def, err := tx.Table(table)
 	if err != nil {
 		return "", err
@@ -389,13 +389,17 @@ func scanRows(tx *db.Tx, table string, conds []Cond, desc bool, limit int, fn fu
 	if err := tx.Scan(table, &p.sc); err != nil {
 		return "", err
 	}
-	n := 0
+	skipped, n := 0, 0
 	for ; p.sc.Valid(); p.sc.Next() {
 		rec := &db.Record{}
 		if err := p.sc.Deref(rec); err != nil {
 			return "", err
 		}
 		if !matches(rec, p.filters) {
+			continue
+		}
+		if skipped < offset {
+			skipped++
 			continue
 		}
 		if err := fn(rec); err != nil {
@@ -427,7 +431,7 @@ func selectRows(tx *db.Tx, st *Stmt) (*Result, error) {
 		}
 	}
 	res := &Result{Statement: "SELECT", Columns: cols, Rows: [][]any{}}
-	plan, err := scanRows(tx, st.Table, st.Where, st.Desc, st.Limit, func(rec *db.Record) error {
+	plan, err := scanRows(tx, st.Table, st.Where, st.Desc, st.Offset, st.Limit, func(rec *db.Record) error {
 		row := make([]any, len(cols))
 		for i, c := range cols {
 			row[i] = rec.Get(c).Any()
@@ -465,7 +469,7 @@ func selectAgg(tx *db.Tx, st *Stmt) (*Result, error) {
 	mins := make([]db.Value, len(st.Aggs))
 	maxs := make([]db.Value, len(st.Aggs))
 	seen := make([]bool, len(st.Aggs))
-	plan, err := scanRows(tx, st.Table, st.Where, false, 0, func(rec *db.Record) error {
+	plan, err := scanRows(tx, st.Table, st.Where, false, 0, 0, func(rec *db.Record) error {
 		count++
 		for i, a := range st.Aggs {
 			if a.Col == "*" {
@@ -512,11 +516,20 @@ func selectAgg(tx *db.Tx, st *Stmt) (*Result, error) {
 			}
 		}
 	}
+	rows := [][]any{row}
+	if st.Offset >= len(rows) {
+		rows = [][]any{}
+	} else if st.Offset > 0 {
+		rows = rows[st.Offset:]
+	}
+	if st.Limit > 0 && len(rows) > st.Limit {
+		rows = rows[:st.Limit]
+	}
 	return &Result{
 		Statement: "SELECT",
 		Columns:   st.Cols,
-		Rows:      [][]any{row},
-		Affected:  1,
+		Rows:      rows,
+		Affected:  len(rows),
 		Plan:      "aggregate via " + plan,
 	}, nil
 }
@@ -547,7 +560,7 @@ func update(tx *db.Tx, st *Stmt) (*Result, error) {
 	}
 	// collect first: the tree must not change under the scanner
 	var rows []*db.Record
-	plan, err := scanRows(tx, st.Table, st.Where, false, 0, func(rec *db.Record) error {
+	plan, err := scanRows(tx, st.Table, st.Where, false, 0, 0, func(rec *db.Record) error {
 		rows = append(rows, rec)
 		return nil
 	})
@@ -568,7 +581,7 @@ func update(tx *db.Tx, st *Stmt) (*Result, error) {
 
 func deleteRows(tx *db.Tx, st *Stmt) (*Result, error) {
 	var rows []*db.Record
-	plan, err := scanRows(tx, st.Table, st.Where, false, 0, func(rec *db.Record) error {
+	plan, err := scanRows(tx, st.Table, st.Where, false, 0, 0, func(rec *db.Record) error {
 		rows = append(rows, rec)
 		return nil
 	})

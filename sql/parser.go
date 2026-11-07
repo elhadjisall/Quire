@@ -54,6 +54,7 @@ type Stmt struct {
 	Where   []Cond
 	Set     []Assign
 	Limit   int // 0 = unlimited
+	Offset  int
 	Desc    bool
 	Explain bool
 }
@@ -445,14 +446,29 @@ func (p *parser) selectStmt() (*Stmt, error) {
 		}
 	}
 	if p.keyword("LIMIT") {
-		t := p.next()
-		n, err := strconv.Atoi(t.text)
-		if t.kind != tokNumber || err != nil || n < 0 {
-			return nil, fmt.Errorf("bad LIMIT")
+		n, err := p.nonneg("LIMIT")
+		if err != nil {
+			return nil, err
 		}
 		st.Limit = n
 	}
+	if p.keyword("OFFSET") {
+		n, err := p.nonneg("OFFSET")
+		if err != nil {
+			return nil, err
+		}
+		st.Offset = n
+	}
 	return st, nil
+}
+
+func (p *parser) nonneg(what string) (int, error) {
+	t := p.next()
+	n, err := strconv.Atoi(t.text)
+	if t.kind != tokNumber || err != nil || n < 0 {
+		return 0, fmt.Errorf("bad %s", what)
+	}
+	return n, nil
 }
 
 func (p *parser) selectItem(st *Stmt) error {

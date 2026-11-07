@@ -143,6 +143,26 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestOffset(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `
+		CREATE TABLE t (id INT64, PRIMARY KEY (id));
+		INSERT INTO t VALUES (1), (2), (3), (4), (5);
+	`)
+	res := mustRun(t, d, `SELECT id FROM t ORDER BY id LIMIT 2 OFFSET 1`)
+	if len(res[0].Rows) != 2 || res[0].Rows[0][0] != int64(2) || res[0].Rows[1][0] != int64(3) {
+		t.Fatalf("offset: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT id FROM t ORDER BY id DESC LIMIT 1 OFFSET 1`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != int64(4) {
+		t.Fatalf("desc offset: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT COUNT(*) FROM t OFFSET 1`)
+	if len(res[0].Rows) != 0 {
+		t.Fatalf("agg offset: %+v", res[0])
+	}
+}
+
 func TestAggregates(t *testing.T) {
 	d := openTemp(t)
 	mustRun(t, d, `
