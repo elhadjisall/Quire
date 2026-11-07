@@ -19,6 +19,8 @@ const (
 	StmtDelete
 	StmtShowTables
 	StmtDescribe
+	StmtCreateIndex
+	StmtDropIndex
 )
 
 // Cond is a single `col op value` predicate; conditions are AND-ed.
@@ -159,6 +161,9 @@ func (p *parser) statement() (*Stmt, error) {
 	case p.keyword("CREATE"):
 		return p.create()
 	case p.keyword("DROP"):
+		if p.keyword("INDEX") {
+			return p.dropIndex()
+		}
 		if err := p.expectKeyword("TABLE"); err != nil {
 			return nil, err
 		}
@@ -187,6 +192,9 @@ func (p *parser) statement() (*Stmt, error) {
 }
 
 func (p *parser) create() (*Stmt, error) {
+	if p.keyword("INDEX") {
+		return p.createIndex()
+	}
 	if err := p.expectKeyword("TABLE"); err != nil {
 		return nil, err
 	}
@@ -264,6 +272,44 @@ func (p *parser) create() (*Stmt, error) {
 		}
 	}
 	return &Stmt{Kind: StmtCreate, Table: name, Def: ordered}, nil
+}
+
+// createIndex parses `CREATE INDEX [name] ON table (cols)`.
+// The optional name is accepted and ignored; indexes are identified by columns.
+func (p *parser) createIndex() (*Stmt, error) {
+	if !p.keyword("ON") {
+		if _, err := p.ident(); err != nil {
+			return nil, err
+		}
+		if err := p.expectKeyword("ON"); err != nil {
+			return nil, err
+		}
+	}
+	return p.indexStmt(StmtCreateIndex)
+}
+
+func (p *parser) dropIndex() (*Stmt, error) {
+	if !p.keyword("ON") {
+		if _, err := p.ident(); err != nil {
+			return nil, err
+		}
+		if err := p.expectKeyword("ON"); err != nil {
+			return nil, err
+		}
+	}
+	return p.indexStmt(StmtDropIndex)
+}
+
+func (p *parser) indexStmt(kind int) (*Stmt, error) {
+	name, err := p.ident()
+	if err != nil {
+		return nil, err
+	}
+	cols, err := p.columnList()
+	if err != nil {
+		return nil, err
+	}
+	return &Stmt{Kind: kind, Table: name, Cols: cols}, nil
 }
 
 func (p *parser) columnList() ([]string, error) {

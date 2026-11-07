@@ -118,6 +118,31 @@ func TestTransactionAtomicity(t *testing.T) {
 	}
 }
 
+func TestCreateIndex(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `
+		CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id));
+		INSERT INTO t VALUES (1, 'b'), (2, 'a'), (3, 'c');
+		CREATE INDEX ON t (name);
+	`)
+	res := mustRun(t, d, `SELECT id FROM t WHERE name = 'a'`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != int64(2) || res[0].Plan != "index scan on (name)" {
+		t.Fatalf("created index: %+v", res[0])
+	}
+	res = mustRun(t, d, `DROP INDEX ON t (name); SELECT id FROM t WHERE name = 'a'`)
+	if res[1].Plan != "full table scan + 1 filter(s)" || len(res[1].Rows) != 1 || res[1].Rows[0][0] != int64(2) {
+		t.Fatalf("after drop: %+v", res[1])
+	}
+	mustRun(t, d, `CREATE INDEX t_name ON t (name)`)
+	if _, err := Run(d, `CREATE INDEX ON t (name)`); err == nil {
+		t.Fatal("duplicate index should fail")
+	}
+	res = mustRun(t, d, `SELECT id FROM t WHERE name = 'c'`)
+	if res[0].Plan != "index scan on (name)" || res[0].Rows[0][0] != int64(3) {
+		t.Fatalf("named index: %+v", res[0])
+	}
+}
+
 func TestParserErrors(t *testing.T) {
 	bad := []string{
 		"SELEC * FROM t",

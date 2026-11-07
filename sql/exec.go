@@ -72,6 +72,16 @@ func Exec(tx *db.Tx, st *Stmt) (*Result, error) {
 		return showTables(tx)
 	case StmtDescribe:
 		return describe(tx, st.Table)
+	case StmtCreateIndex:
+		if err := tx.CreateIndex(st.Table, st.Cols); err != nil {
+			return nil, err
+		}
+		return &Result{Statement: "CREATE INDEX", Message: fmt.Sprintf("index on %s (%s) created", st.Table, strings.Join(st.Cols, ", "))}, nil
+	case StmtDropIndex:
+		if err := tx.DropIndex(st.Table, st.Cols); err != nil {
+			return nil, err
+		}
+		return &Result{Statement: "DROP INDEX", Message: fmt.Sprintf("index on %s (%s) dropped", st.Table, strings.Join(st.Cols, ", "))}, nil
 	case StmtInsert, StmtUpsert:
 		return insert(tx, st)
 	case StmtSelect:
