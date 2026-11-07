@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -36,13 +37,13 @@ func main() {
 
 	switch cmd {
 	case "shell":
-		shell(database)
+		shell(database, os.Stdin, os.Stdout)
 	case "exec":
 		if len(os.Args) < 4 {
 			fail(fmt.Errorf("missing script"))
 		}
 		results, err := sql.Run(database, strings.Join(os.Args[3:], " "))
-		printResults(results)
+		printResults(os.Stdout, results)
 		if err != nil {
 			fail(err)
 		}
@@ -60,49 +61,84 @@ func main() {
 	}
 }
 
-func shell(database *db.DB) {
-	fmt.Println("kvdb shell - statements end with ';', type .quit to exit")
-	in := bufio.NewScanner(os.Stdin)
-	in.Buffer(make([]byte, 1<<20), 1<<20)
+func shell(database *db.DB, in io.Reader, w io.Writer) {
+	fmt.Fprintln(w, "kvdb shell - statements end with ';', .help for commands")
+	sess := sql.NewSession(database)
+	defer sess.Close()
+	sc := bufio.NewScanner(in)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	var buf strings.Builder
-	prompt := "kvdb> "
 	for {
-		fmt.Print(prompt)
-		if !in.Scan() {
-			fmt.Println()
+		prompt := "kvdb> "
+		if sess.InTx() {
+			prompt = "kvdb*> "
+		}
+		if buf.Len() > 0 {
+			prompt = "   -> "
+		}
+		fmt.Fprint(w, prompt)
+		if !sc.Scan() {
+			fmt.Fprintln(w)
 			return
 		}
-		line := strings.TrimSpace(in.Text())
+		line := strings.TrimSpace(sc.Text())
 		switch line {
 		case ".quit", ".exit", "\\q":
 			return
+		case ".help":
+			fmt.Fprint(w, ".quit    exit\n.tables  list tables\n.schema  describe every table\n.stats   storage statistics\n.help    this message\n")
+			continue
 		case ".tables":
 			line = "SHOW TABLES;"
+		case ".schema":
+			writeSchema(sess, w)
+			continue
 		case ".stats":
+			if sess.InTx() {
+				fmt.Fprintln(w, "commit or rollback the open transaction first")
+				continue
+			}
 			st := database.Stats()
-			fmt.Printf("pages=%d free=%d version=%d size=%d bytes\n", st.Pages, st.FreePages, st.Version, st.SizeBytes)
+			fmt.Fprintf(w, "pages=%d free=%d version=%d size=%d bytes\n", st.Pages, st.FreePages, st.Version, st.SizeBytes)
 			continue
 		}
 		buf.WriteString(line)
 		buf.WriteByte('\n')
 		if !strings.HasSuffix(line, ";") {
-			prompt = "   -> "
 			continue
 		}
-		prompt = "kvdb> "
-		results, err := sql.Run(database, buf.String())
+		results, err := sess.Exec(buf.String())
 		buf.Reset()
-		printResults(results)
+		printResults(w, results)
 		if err != nil {
-			fmt.Println("error:", err)
+			fmt.Fprintln(w, "error:", err)
 		}
 	}
 }
 
-func printResults(results []*sql.Result) {
+func writeSchema(sess *sql.Session, w io.Writer) {
+	res, err := sess.Exec("SHOW TABLES;")
+	printResults(w, res)
+	if err != nil {
+		fmt.Fprintln(w, "error:", err)
+		return
+	}
+	if len(res) == 0 {
+		return
+	}
+	for _, row := range res[0].Rows {
+		dres, derr := sess.Exec("DESCRIBE " + fmt.Sprint(row[0]) + ";")
+		printResults(w, dres)
+		if derr != nil {
+			fmt.Fprintln(w, "error:", derr)
+		}
+	}
+}
+
+func printResults(w io.Writer, results []*sql.Result) {
 	for _, r := range results {
 		if r.Columns == nil {
-			fmt.Printf("%s (%.2f ms)\n", r.Message, r.Millis)
+			fmt.Fprintf(w, "%s (%.2f ms)\n", r.Message, r.Millis)
 			continue
 		}
 		widths := make([]int, len(r.Columns))
@@ -123,26 +159,26 @@ func printResults(results []*sql.Result) {
 		for _, w := range widths {
 			sep += strings.Repeat("-", w+2) + "+"
 		}
-		fmt.Println(sep)
-		fmt.Print("|")
+		fmt.Fprintln(w, sep)
+		fmt.Fprint(w, "|")
 		for i, c := range r.Columns {
-			fmt.Printf(" %-*s |", widths[i], c)
+			fmt.Fprintf(w, " %-*s |", widths[i], c)
 		}
-		fmt.Println()
-		fmt.Println(sep)
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, sep)
 		for _, row := range cells {
-			fmt.Print("|")
+			fmt.Fprint(w, "|")
 			for i, v := range row {
-				fmt.Printf(" %-*s |", widths[i], v)
+				fmt.Fprintf(w, " %-*s |", widths[i], v)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
-		fmt.Println(sep)
+		fmt.Fprintln(w, sep)
 		plan := ""
 		if r.Plan != "" {
 			plan = " via " + r.Plan
 		}
-		fmt.Printf("%d row(s)%s (%.2f ms)\n", len(r.Rows), plan, r.Millis)
+		fmt.Fprintf(w, "%d row(s)%s (%.2f ms)\n", len(r.Rows), plan, r.Millis)
 	}
 }
 
