@@ -143,6 +143,36 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestOrderBySort(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `
+		CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id));
+		INSERT INTO t VALUES (1, 'c'), (2, 'a'), (3, 'b');
+	`)
+	res := mustRun(t, d, `SELECT name FROM t ORDER BY name`)
+	if len(res[0].Rows) != 3 || res[0].Rows[0][0] != "a" || res[0].Rows[1][0] != "b" || res[0].Rows[2][0] != "c" {
+		t.Fatalf("asc: %+v", res[0])
+	}
+	if len(res[0].Plan) < 6 || res[0].Plan[len(res[0].Plan)-6:] != "+ sort" {
+		t.Fatalf("plan %q", res[0].Plan)
+	}
+	res = mustRun(t, d, `SELECT name FROM t ORDER BY name DESC`)
+	if res[0].Rows[0][0] != "c" || res[0].Rows[2][0] != "a" {
+		t.Fatalf("desc: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT name FROM t ORDER BY name LIMIT 1 OFFSET 1`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != "b" {
+		t.Fatalf("window: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT name FROM t ORDER BY id DESC LIMIT 1`)
+	if res[0].Rows[0][0] != "b" || (len(res[0].Plan) >= 6 && res[0].Plan[len(res[0].Plan)-6:] == "+ sort") {
+		t.Fatalf("pk order should not sort: %+v", res[0])
+	}
+	if _, err := Run(d, `SELECT COUNT(*) FROM t ORDER BY name`); err == nil {
+		t.Fatal("order by aggregate should fail")
+	}
+}
+
 func TestOffset(t *testing.T) {
 	d := openTemp(t)
 	mustRun(t, d, `

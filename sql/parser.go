@@ -55,6 +55,7 @@ type Stmt struct {
 	Set     []Assign
 	Limit   int // 0 = unlimited
 	Offset  int
+	OrderBy string
 	Desc    bool
 	Explain bool
 }
@@ -436,9 +437,11 @@ func (p *parser) selectStmt() (*Stmt, error) {
 		if err := p.expectKeyword("BY"); err != nil {
 			return nil, err
 		}
-		if _, err := p.ident(); err != nil { // ordering follows the chosen key
+		col, err := p.ident()
+		if err != nil {
 			return nil, err
 		}
+		st.OrderBy = col
 		if p.keyword("DESC") {
 			st.Desc = true
 		} else {

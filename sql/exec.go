@@ -2,6 +2,7 @@ package sql
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -217,9 +218,10 @@ func insert(tx *db.Tx, st *Stmt) (*Result, error) {
 
 // plan turns WHERE conditions into a scanner plus leftover filters.
 type plan struct {
-	sc      db.Scanner
-	filters []Cond
-	desc    string
+	sc       db.Scanner
+	filters  []Cond
+	desc     string
+	orderCol string // column a forward scan is ordered by
 }
 
 func buildPlan(def *db.TableDef, conds []Cond, desc bool) (*plan, error) {
@@ -310,6 +312,9 @@ func buildPlan(def *db.TableDef, conds []Cond, desc bool) (*plan, error) {
 		cmp1, cmp2 = cmp2, cmp1
 	}
 	p.sc = db.Scanner{Cmp1: cmp1, Cmp2: cmp2, Key1: k1, Key2: k2}
+	if col := scanOrderCol(def, key, len(eq)); col != "" {
+		p.orderCol = col
+	}
 
 	switch {
 	case bestScore == 0:
@@ -325,6 +330,26 @@ func buildPlan(def *db.TableDef, conds []Cond, desc bool) (*plan, error) {
 		p.desc += fmt.Sprintf(" + %d filter(s)", len(p.filters))
 	}
 	return p, nil
+}
+
+// scanOrderCol is the first column that still varies along a forward scan
+// after `eq` leading equalities on key.
+func scanOrderCol(def *db.TableDef, key []string, eq int) string {
+	seen := map[string]bool{}
+	order := append([]string(nil), key...)
+	for _, c := range key {
+		seen[c] = true
+	}
+	for _, c := range def.Cols[:def.PKeys] {
+		if !seen[c] {
+			order = append(order, c)
+			seen[c] = true
+		}
+	}
+	if eq < 0 || eq >= len(order) {
+		return ""
+	}
+	return order[eq]
 }
 
 func hasEq(conds []Cond, col string) bool { return findCond(conds, col, "=") >= 0 }
@@ -430,24 +455,60 @@ func selectRows(tx *db.Tx, st *Stmt) (*Result, error) {
 			return nil, fmt.Errorf("unknown column %q", c)
 		}
 	}
-	res := &Result{Statement: "SELECT", Columns: cols, Rows: [][]any{}}
-	plan, err := scanRows(tx, st.Table, st.Where, st.Desc, st.Offset, st.Limit, func(rec *db.Record) error {
-		row := make([]any, len(cols))
-		for i, c := range cols {
-			row[i] = rec.Get(c).Any()
-		}
-		res.Rows = append(res.Rows, row)
+	if st.OrderBy != "" && indexOf(def.Cols, st.OrderBy) < 0 {
+		return nil, fmt.Errorf("unknown column %q", st.OrderBy)
+	}
+	probe, err := buildPlan(def, st.Where, false)
+	if err != nil {
+		return nil, err
+	}
+	needSort := st.OrderBy != "" && probe.orderCol != st.OrderBy
+	desc, offset, limit := st.Desc, st.Offset, st.Limit
+	if needSort {
+		desc, offset, limit = false, 0, 0
+	}
+	var recs []*db.Record
+	plan, err := scanRows(tx, st.Table, st.Where, desc, offset, limit, func(rec *db.Record) error {
+		recs = append(recs, rec)
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	res.Plan = plan
+	if needSort {
+		sort.SliceStable(recs, func(i, j int) bool {
+			c := recs[i].Get(st.OrderBy).Compare(*recs[j].Get(st.OrderBy))
+			if st.Desc {
+				return c > 0
+			}
+			return c < 0
+		})
+		if st.Offset >= len(recs) {
+			recs = nil
+		} else {
+			recs = recs[st.Offset:]
+		}
+		if st.Limit > 0 && len(recs) > st.Limit {
+			recs = recs[:st.Limit]
+		}
+		plan += " + sort"
+	}
+	res := &Result{Statement: "SELECT", Columns: cols, Rows: [][]any{}, Plan: plan}
+	for _, rec := range recs {
+		row := make([]any, len(cols))
+		for i, c := range cols {
+			row[i] = rec.Get(c).Any()
+		}
+		res.Rows = append(res.Rows, row)
+	}
 	res.Affected = len(res.Rows)
 	return res, nil
 }
 
 func selectAgg(tx *db.Tx, st *Stmt) (*Result, error) {
+	if st.OrderBy != "" {
+		return nil, fmt.Errorf("ORDER BY cannot be used with aggregates")
+	}
 	def, err := tx.Table(st.Table)
 	if err != nil {
 		return nil, err
