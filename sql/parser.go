@@ -24,6 +24,12 @@ const (
 	StmtShowIndex
 )
 
+// Agg is one aggregate function in a select list.
+type Agg struct {
+	Func string // COUNT, SUM, MIN, MAX
+	Col  string // "*" for COUNT(*)
+}
+
 // Cond is a single `col op value` predicate; conditions are AND-ed.
 type Cond struct {
 	Col string
@@ -43,6 +49,7 @@ type Stmt struct {
 	Table   string
 	Def     *db.TableDef // CREATE
 	Cols    []string     // INSERT columns / SELECT columns (nil = *)
+	Aggs    []Agg        // set when the select list is aggregate-only
 	Rows    [][]db.Value // INSERT values
 	Where   []Cond
 	Set     []Assign
@@ -405,11 +412,9 @@ func (p *parser) selectStmt() (*Stmt, error) {
 	st := &Stmt{Kind: StmtSelect}
 	if !p.symbol("*") {
 		for {
-			c, err := p.ident()
-			if err != nil {
+			if err := p.selectItem(st); err != nil {
 				return nil, err
 			}
-			st.Cols = append(st.Cols, c)
 			if !p.symbol(",") {
 				break
 			}
@@ -448,6 +453,51 @@ func (p *parser) selectStmt() (*Stmt, error) {
 		st.Limit = n
 	}
 	return st, nil
+}
+
+func (p *parser) selectItem(st *Stmt) error {
+	t := p.peek()
+	if t.kind == tokIdent {
+		fn := strings.ToUpper(t.text)
+		if (fn == "COUNT" || fn == "SUM" || fn == "MIN" || fn == "MAX") &&
+			p.pos+1 < len(p.toks) && p.toks[p.pos+1].kind == tokSymbol && p.toks[p.pos+1].text == "(" {
+			if len(st.Aggs) == 0 && len(st.Cols) > 0 {
+				return fmt.Errorf("aggregates cannot mix with columns")
+			}
+			p.next()
+			if err := p.expectSymbol("("); err != nil {
+				return err
+			}
+			col := "*"
+			if fn == "COUNT" && p.symbol("*") {
+				// COUNT(*)
+			} else {
+				if p.peek().kind == tokSymbol && p.peek().text == "*" {
+					return fmt.Errorf("%s(*) is not valid", fn)
+				}
+				var err error
+				col, err = p.ident()
+				if err != nil {
+					return err
+				}
+			}
+			if err := p.expectSymbol(")"); err != nil {
+				return err
+			}
+			st.Aggs = append(st.Aggs, Agg{Func: fn, Col: col})
+			st.Cols = append(st.Cols, fn+"("+col+")")
+			return nil
+		}
+	}
+	if len(st.Aggs) > 0 {
+		return fmt.Errorf("aggregates cannot mix with columns")
+	}
+	c, err := p.ident()
+	if err != nil {
+		return err
+	}
+	st.Cols = append(st.Cols, c)
+	return nil
 }
 
 func (p *parser) where() ([]Cond, error) {

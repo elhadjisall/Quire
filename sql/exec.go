@@ -111,12 +111,16 @@ func explain(tx *db.Tx, st *Stmt) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	desc := p.desc
+	if len(st.Aggs) > 0 {
+		desc = "aggregate via " + desc
+	}
 	return &Result{
 		Statement: "EXPLAIN",
 		Columns:   []string{"plan"},
-		Rows:      [][]any{{p.desc}},
+		Rows:      [][]any{{desc}},
 		Affected:  1,
-		Plan:      p.desc,
+		Plan:      desc,
 	}, nil
 }
 
@@ -406,6 +410,9 @@ func scanRows(tx *db.Tx, table string, conds []Cond, desc bool, limit int, fn fu
 }
 
 func selectRows(tx *db.Tx, st *Stmt) (*Result, error) {
+	if len(st.Aggs) > 0 {
+		return selectAgg(tx, st)
+	}
 	def, err := tx.Table(st.Table)
 	if err != nil {
 		return nil, err
@@ -434,6 +441,91 @@ func selectRows(tx *db.Tx, st *Stmt) (*Result, error) {
 	res.Plan = plan
 	res.Affected = len(res.Rows)
 	return res, nil
+}
+
+func selectAgg(tx *db.Tx, st *Stmt) (*Result, error) {
+	def, err := tx.Table(st.Table)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range st.Aggs {
+		if a.Col == "*" {
+			continue
+		}
+		i := indexOf(def.Cols, a.Col)
+		if i < 0 {
+			return nil, fmt.Errorf("unknown column %q", a.Col)
+		}
+		if a.Func == "SUM" && def.Types[i] != db.TypeInt64 {
+			return nil, fmt.Errorf("SUM(%s) needs INT64", a.Col)
+		}
+	}
+	var count int64
+	sums := make([]int64, len(st.Aggs))
+	mins := make([]db.Value, len(st.Aggs))
+	maxs := make([]db.Value, len(st.Aggs))
+	seen := make([]bool, len(st.Aggs))
+	plan, err := scanRows(tx, st.Table, st.Where, false, 0, func(rec *db.Record) error {
+		count++
+		for i, a := range st.Aggs {
+			if a.Col == "*" {
+				continue
+			}
+			v := rec.Get(a.Col)
+			if v == nil {
+				return fmt.Errorf("missing column %q", a.Col)
+			}
+			switch a.Func {
+			case "SUM":
+				sums[i] += v.I64
+			case "MIN":
+				if !seen[i] || v.Compare(mins[i]) < 0 {
+					mins[i] = copyValue(*v)
+					seen[i] = true
+				}
+			case "MAX":
+				if !seen[i] || v.Compare(maxs[i]) > 0 {
+					maxs[i] = copyValue(*v)
+					seen[i] = true
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	row := make([]any, len(st.Aggs))
+	for i, a := range st.Aggs {
+		switch a.Func {
+		case "COUNT":
+			row[i] = count
+		case "SUM":
+			row[i] = sums[i]
+		case "MIN":
+			if seen[i] {
+				row[i] = mins[i].Any()
+			}
+		case "MAX":
+			if seen[i] {
+				row[i] = maxs[i].Any()
+			}
+		}
+	}
+	return &Result{
+		Statement: "SELECT",
+		Columns:   st.Cols,
+		Rows:      [][]any{row},
+		Affected:  1,
+		Plan:      "aggregate via " + plan,
+	}, nil
+}
+
+func copyValue(v db.Value) db.Value {
+	if v.Type == db.TypeBytes {
+		v.Str = append([]byte(nil), v.Str...)
+	}
+	return v
 }
 
 func update(tx *db.Tx, st *Stmt) (*Result, error) {

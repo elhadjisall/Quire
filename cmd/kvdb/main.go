@@ -113,7 +113,7 @@ func printResults(results []*sql.Result) {
 		for ri, row := range r.Rows {
 			cells[ri] = make([]string, len(row))
 			for i, v := range row {
-				cells[ri][i] = fmt.Sprint(v)
+				cells[ri][i] = cellText(v)
 				if len(cells[ri][i]) > widths[i] {
 					widths[i] = len(cells[ri][i])
 				}
@@ -144,6 +144,13 @@ func printResults(results []*sql.Result) {
 		}
 		fmt.Printf("%d row(s)%s (%.2f ms)\n", len(r.Rows), plan, r.Millis)
 	}
+}
+
+func cellText(v any) string {
+	if v == nil {
+		return "NULL"
+	}
+	return fmt.Sprint(v)
 }
 
 func fail(err error) {

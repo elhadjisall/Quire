@@ -143,6 +143,40 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestAggregates(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `
+		CREATE TABLE t (id INT64, name STRING, age INT64, PRIMARY KEY (id));
+		INSERT INTO t VALUES (1, 'ada', 36), (2, 'linus', 54), (3, 'grace', 36);
+	`)
+	res := mustRun(t, d, `SELECT COUNT(*), MIN(age), MAX(age), SUM(age) FROM t`)
+	row := res[0].Rows[0]
+	if row[0] != int64(3) || row[1] != int64(36) || row[2] != int64(54) || row[3] != int64(126) {
+		t.Fatalf("agg: %#v", row)
+	}
+	if len(res[0].Plan) < 14 || res[0].Plan[:14] != "aggregate via " {
+		t.Fatalf("plan %q", res[0].Plan)
+	}
+	res = mustRun(t, d, `SELECT COUNT(name), MIN(name), MAX(name) FROM t WHERE age = 36`)
+	if res[0].Rows[0][0] != int64(2) || res[0].Rows[0][1] != "ada" || res[0].Rows[0][2] != "grace" {
+		t.Fatalf("filtered: %#v", res[0].Rows[0])
+	}
+	res = mustRun(t, d, `SELECT COUNT(*), SUM(age), MIN(age) FROM t WHERE id < 0`)
+	if res[0].Rows[0][0] != int64(0) || res[0].Rows[0][1] != int64(0) || res[0].Rows[0][2] != nil {
+		t.Fatalf("empty: %#v", res[0].Rows[0])
+	}
+	if _, err := Run(d, `SELECT name, COUNT(*) FROM t`); err == nil {
+		t.Fatal("mixed aggregate should fail")
+	}
+	if _, err := Run(d, `SELECT SUM(name) FROM t`); err == nil {
+		t.Fatal("sum of string should fail")
+	}
+	res = mustRun(t, d, `EXPLAIN SELECT COUNT(*) FROM t WHERE id = 1`)
+	if res[0].Rows[0][0] != "aggregate via primary key lookup" {
+		t.Fatalf("explain agg: %+v", res[0])
+	}
+}
+
 func TestExplain(t *testing.T) {
 	d := openTemp(t)
 	mustRun(t, d, `CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id)); INSERT INTO t VALUES (1, 'a');`)
