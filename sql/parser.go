@@ -21,6 +21,7 @@ const (
 	StmtDescribe
 	StmtCreateIndex
 	StmtDropIndex
+	StmtShowIndex
 )
 
 // Cond is a single `col op value` predicate; conditions are AND-ed.
@@ -180,10 +181,17 @@ func (p *parser) statement() (*Stmt, error) {
 	case p.keyword("DELETE"):
 		return p.deleteStmt()
 	case p.keyword("SHOW"):
-		if err := p.expectKeyword("TABLES"); err != nil {
-			return nil, err
+		if p.keyword("TABLES") {
+			return &Stmt{Kind: StmtShowTables}, nil
 		}
-		return &Stmt{Kind: StmtShowTables}, nil
+		if p.keyword("INDEX") || p.keyword("INDEXES") {
+			if p.keyword("FROM") || p.keyword("ON") {
+				name, err := p.ident()
+				return &Stmt{Kind: StmtShowIndex, Table: name}, err
+			}
+			return &Stmt{Kind: StmtShowIndex}, nil
+		}
+		return nil, p.errorf("expected TABLES or INDEX")
 	case p.keyword("DESCRIBE") || p.keyword("DESC"):
 		name, err := p.ident()
 		return &Stmt{Kind: StmtDescribe, Table: name}, err

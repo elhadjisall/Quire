@@ -143,6 +143,19 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestShowIndex(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `CREATE TABLE t (id INT64, name STRING, PRIMARY KEY (id), INDEX (name))`)
+	res := mustRun(t, d, `SHOW INDEX FROM t`)
+	if len(res[0].Rows) != 2 || res[0].Rows[0][1] != "PRIMARY" || res[0].Rows[1][1] != "INDEX" || res[0].Rows[1][2] != "name" {
+		t.Fatalf("show index: %+v", res[0])
+	}
+	res = mustRun(t, d, `SHOW INDEXES`)
+	if len(res[0].Rows) != 2 {
+		t.Fatalf("show indexes: %+v", res[0])
+	}
+}
+
 func TestParserErrors(t *testing.T) {
 	bad := []string{
 		"SELEC * FROM t",

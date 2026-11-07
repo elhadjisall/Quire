@@ -30,7 +30,7 @@ func Run(database *db.DB, script string) ([]*Result, error) {
 	writes := false
 	for _, st := range stmts {
 		switch st.Kind {
-		case StmtSelect, StmtShowTables, StmtDescribe:
+		case StmtSelect, StmtShowTables, StmtDescribe, StmtShowIndex:
 		default:
 			writes = true
 		}
@@ -72,6 +72,8 @@ func Exec(tx *db.Tx, st *Stmt) (*Result, error) {
 		return showTables(tx)
 	case StmtDescribe:
 		return describe(tx, st.Table)
+	case StmtShowIndex:
+		return showIndex(tx, st.Table)
 	case StmtCreateIndex:
 		if err := tx.CreateIndex(st.Table, st.Cols); err != nil {
 			return nil, err
@@ -107,6 +109,19 @@ func showTables(tx *db.Tx) (*Result, error) {
 		}
 		res.Rows = append(res.Rows, []any{d.Name, int64(len(d.Cols)),
 			strings.Join(d.Cols[:d.PKeys], ", "), strings.Join(idx, " ")})
+	}
+	res.Affected = len(res.Rows)
+	return res, nil
+}
+
+func showIndex(tx *db.Tx, table string) (*Result, error) {
+	info, err := tx.Indexes(table)
+	if err != nil {
+		return nil, err
+	}
+	res := &Result{Statement: "SHOW INDEX", Columns: []string{"table", "type", "columns"}, Rows: [][]any{}}
+	for _, ix := range info {
+		res.Rows = append(res.Rows, []any{ix.Table, ix.Kind, strings.Join(ix.Columns, ", ")})
 	}
 	res.Affected = len(res.Rows)
 	return res, nil
