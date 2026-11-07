@@ -30,12 +30,7 @@ func Run(database *db.DB, script string) ([]*Result, error) {
 	}
 	writes := false
 	for _, st := range stmts {
-		if st.Explain {
-			continue
-		}
-		switch st.Kind {
-		case StmtSelect, StmtShowTables, StmtDescribe, StmtShowIndex:
-		default:
+		if !isRead(st) {
 			writes = true
 		}
 	}

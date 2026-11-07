@@ -22,6 +22,9 @@ const (
 	StmtCreateIndex
 	StmtDropIndex
 	StmtShowIndex
+	StmtBegin
+	StmtCommit
+	StmtRollback
 )
 
 // Agg is one aggregate function in a select list.
@@ -169,6 +172,15 @@ func Parse(input string) ([]*Stmt, error) {
 
 func (p *parser) statement() (*Stmt, error) {
 	switch {
+	case p.keyword("BEGIN"):
+		p.keyword("TRANSACTION")
+		return &Stmt{Kind: StmtBegin}, nil
+	case p.keyword("COMMIT"):
+		p.keyword("TRANSACTION")
+		return &Stmt{Kind: StmtCommit}, nil
+	case p.keyword("ROLLBACK"):
+		p.keyword("TRANSACTION")
+		return &Stmt{Kind: StmtRollback}, nil
 	case p.keyword("EXPLAIN"):
 		return p.explain()
 	case p.keyword("CREATE"):
