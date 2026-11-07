@@ -234,6 +234,7 @@ func buildPlan(def *db.TableDef, conds []Cond, desc bool) (*plan, error) {
 			return nil, fmt.Errorf("column %q is %s", c.Col, db.TypeName(def.Types[i]))
 		}
 	}
+	conds = rewriteLike(conds)
 	// candidate keys: primary key first, then indexes
 	keys := [][]string{def.Cols[:def.PKeys]}
 	keys = append(keys, def.Indexes...)
@@ -352,6 +353,80 @@ func scanOrderCol(def *db.TableDef, key []string, eq int) string {
 	return order[eq]
 }
 
+func rewriteLike(conds []Cond) []Cond {
+	out := make([]Cond, 0, len(conds))
+	for _, c := range conds {
+		if c.Op != "LIKE" {
+			out = append(out, c)
+			continue
+		}
+		prefix, rest, exact := splitLike(string(c.Val.Str))
+		switch {
+		case exact:
+			out = append(out, Cond{Col: c.Col, Op: "=", Val: c.Val})
+		case prefix != "" && rest == "%":
+			out = append(out, Cond{Col: c.Col, Op: ">=", Val: db.Bytes([]byte(prefix))})
+			if up, ok := prefixUpper(prefix); ok {
+				out = append(out, Cond{Col: c.Col, Op: "<", Val: db.Bytes([]byte(up))})
+			}
+		default:
+			if prefix != "" {
+				out = append(out, Cond{Col: c.Col, Op: ">=", Val: db.Bytes([]byte(prefix))})
+				if up, ok := prefixUpper(prefix); ok {
+					out = append(out, Cond{Col: c.Col, Op: "<", Val: db.Bytes([]byte(up))})
+				}
+			}
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func splitLike(pat string) (prefix, rest string, exact bool) {
+	for i := 0; i < len(pat); i++ {
+		if pat[i] == '%' || pat[i] == '_' {
+			return pat[:i], pat[i:], false
+		}
+	}
+	return pat, "", true
+}
+
+func prefixUpper(prefix string) (string, bool) {
+	b := []byte(prefix)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] < 0xff {
+			b[i]++
+			return string(b[:i+1]), true
+		}
+	}
+	return "", false
+}
+
+// likeMatch implements % (any sequence) and _ (one byte).
+func likeMatch(s, pat string) bool {
+	n, m := len(s), len(pat)
+	prev := make([]bool, n+1)
+	prev[0] = true
+	for j := 1; j <= m; j++ {
+		cur := make([]bool, n+1)
+		pc := pat[j-1]
+		if pc == '%' {
+			cur[0] = prev[0]
+			for i := 1; i <= n; i++ {
+				cur[i] = cur[i-1] || prev[i]
+			}
+		} else {
+			for i := 1; i <= n; i++ {
+				if (pc == '_' || pc == s[i-1]) && prev[i-1] {
+					cur[i] = true
+				}
+			}
+		}
+		prev = cur
+	}
+	return prev[n]
+}
+
 func hasEq(conds []Cond, col string) bool { return findCond(conds, col, "=") >= 0 }
 
 func hasRange(conds []Cond, col string) bool {
@@ -393,6 +468,8 @@ func matches(rec *db.Record, filters []Cond) bool {
 			ok = c > 0
 		case ">=":
 			ok = c >= 0
+		case "LIKE":
+			ok = likeMatch(string(v.Str), string(f.Val.Str))
 		}
 		if !ok {
 			return false

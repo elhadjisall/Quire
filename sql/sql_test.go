@@ -143,6 +143,39 @@ func TestCreateIndex(t *testing.T) {
 	}
 }
 
+func TestLike(t *testing.T) {
+	d := openTemp(t)
+	mustRun(t, d, `
+		CREATE TABLE users (
+			id INT64, name STRING, email STRING,
+			PRIMARY KEY (id), INDEX (email)
+		);
+		INSERT INTO users VALUES
+			(1, 'ada', 'ada@x.io'),
+			(2, 'alan', 'alan@x.io'),
+			(3, 'grace', 'grace@navy.mil');
+	`)
+	res := mustRun(t, d, `SELECT name FROM users WHERE name LIKE 'a%' ORDER BY name`)
+	if len(res[0].Rows) != 2 || res[0].Rows[0][0] != "ada" || res[0].Rows[1][0] != "alan" {
+		t.Fatalf("prefix: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT name FROM users WHERE email LIKE 'grace%'`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != "grace" || res[0].Plan != "index scan on (email)" {
+		t.Fatalf("index like: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT name FROM users WHERE email LIKE '%navy%'`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != "grace" || res[0].Plan != "full table scan + 1 filter(s)" {
+		t.Fatalf("contains: %+v", res[0])
+	}
+	res = mustRun(t, d, `SELECT name FROM users WHERE name LIKE 'a_a'`)
+	if len(res[0].Rows) != 1 || res[0].Rows[0][0] != "ada" {
+		t.Fatalf("underscore: %+v", res[0])
+	}
+	if !likeMatch("hello", "%") || !likeMatch("ab", "a%") || likeMatch("ab", "a%c") || !likeMatch("", "%") || !likeMatch("ada", "a_a") {
+		t.Fatal("likeMatch")
+	}
+}
+
 func TestOrderBySort(t *testing.T) {
 	d := openTemp(t)
 	mustRun(t, d, `

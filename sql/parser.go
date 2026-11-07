@@ -542,6 +542,15 @@ func (p *parser) where() ([]Cond, error) {
 				return nil, err
 			}
 			conds = append(conds, Cond{col, ">=", lo}, Cond{col, "<=", hi})
+		} else if p.keyword("LIKE") {
+			v, err := p.value()
+			if err != nil {
+				return nil, err
+			}
+			if v.Type != db.TypeBytes {
+				return nil, fmt.Errorf("LIKE needs a string")
+			}
+			conds = append(conds, Cond{col, "LIKE", v})
 		} else {
 			t := p.next()
 			if t.kind != tokSymbol || !strings.Contains("= != <> < <= > >=", t.text) || t.text == "(" {
