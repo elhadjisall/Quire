@@ -143,3 +143,42 @@ func TestRangeScan(t *testing.T) {
 		t.Fatalf("range scan returned %d keys", n)
 	}
 }
+
+func TestPageMap(t *testing.T) {
+	db := openTemp(t)
+	pm := db.PageMap()
+	if pm.Used < 2 || len(pm.Pages) != int(pm.Used) || pm.Pages[0].Kind != "master" {
+		t.Fatalf("fresh map: %+v", pm)
+	}
+	free := 0
+	for _, p := range pm.Pages {
+		if p.Kind == "freelist" {
+			free++
+		}
+	}
+	if free < 1 || pm.FreePages != free {
+		t.Fatalf("freelist pages: counted %d field %d", free, pm.FreePages)
+	}
+
+	for i := 0; i < 200; i++ {
+		if err := db.Set([]byte(fmt.Sprintf("k%04d", i)), []byte("v")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pm = db.PageMap()
+	if pm.LeafKeys != 200 || pm.Leaves < 1 || pm.Height < 1 {
+		t.Fatalf("after insert: height=%d leaves=%d keys=%d", pm.Height, pm.Leaves, pm.LeafKeys)
+	}
+	leaves := 0
+	for _, p := range pm.Pages {
+		if p.Kind == "leaf" {
+			leaves++
+			if p.Keys < 1 || p.Used <= 0 {
+				t.Fatalf("leaf page %+v", p)
+			}
+		}
+	}
+	if leaves != pm.Leaves {
+		t.Fatalf("leaf count %d vs %d", leaves, pm.Leaves)
+	}
+}
