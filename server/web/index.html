@@ -42,6 +42,7 @@
         <div class="view-switch" id="view-switch">
           <button type="button" class="tab active" data-view="sql">SQL</button>
           <button type="button" class="tab" data-view="indexes">Indexes</button>
+          <button type="button" class="tab" data-view="pages">Pages</button>
         </div>
         <div class="tabs" id="tabs"></div>
       </div>
@@ -76,6 +77,16 @@ SELECT * FROM users WHERE age >= 30 LIMIT 20;"></textarea>
       </div>
       <div id="index-picker" class="idx-picker"></div>
       <div id="index-body" class="panel-body"><div class="muted">Select an index above, or open a table in the sidebar.</div></div>
+    </section>
+    <section class="panel" id="page-panel">
+      <div class="panel-bar">
+        <div>
+          <div class="panel-title">Page map</div>
+          <div class="muted" id="page-meta">Copy-on-write pages. The master page is rewritten last on commit.</div>
+        </div>
+      </div>
+      <div id="page-summary" class="summary"></div>
+      <div id="page-body" class="panel-body"><div class="muted">Open this view to inspect the file.</div></div>
     </section>
     </div>
 

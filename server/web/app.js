@@ -259,6 +259,34 @@
     });
   }
 
+  async function loadPages() {
+    const summary = $("#page-summary");
+    const body = $("#page-body");
+    body.innerHTML = '<div class="muted">Loading pages…</div>';
+    const resp = await fetch("/api/pages");
+    if (!resp.ok) {
+      body.innerHTML = `<div class="result-msg err">${esc(await resp.text())}</div>`;
+      return;
+    }
+    const pm = await resp.json();
+    const cards = [
+      ["height", pm.height],
+      ["leaf keys", pm.leaf_keys],
+      ["leaves", pm.leaves],
+      ["internal", pm.internal],
+      ["free items", pm.free_items],
+      ["unused", pm.unused],
+    ];
+    summary.innerHTML = cards.map(([k, v]) => `<div class="stat"><span class="stat-k">${esc(k)}</span><span class="stat-v">${esc(v)}</span></div>`).join("");
+    const pages = pm.pages || [];
+    body.innerHTML = `<div class="grid-wrap"><table class="grid"><thead><tr><th>page</th><th>kind</th><th>keys</th><th>used</th><th>fill</th></tr></thead><tbody>${
+      pages.map((p) => {
+        const fill = p.used ? Math.round((100 * p.used) / 4096) + "%" : "—";
+        return `<tr><td class="num">${p.id}</td><td><span class="kind ${esc(p.kind)}">${esc(p.kind)}</span></td><td class="num">${p.keys || "—"}</td><td class="num">${p.used ? fmtBytes(p.used) : "—"}</td><td class="num">${fill}</td></tr>`;
+      }).join("")
+    }</tbody></table></div><div class="muted">${pm.truncated ? "showing the first " + pages.length + " pages" : pages.length + " pages · " + fmtBytes((pm.used || 0) * 4096)}</div>`;
+  }
+
   // ---------- wiring ----------
   document.querySelectorAll("#view-switch .tab").forEach((b) => {
     b.onclick = () => setMode(b.dataset.view);
