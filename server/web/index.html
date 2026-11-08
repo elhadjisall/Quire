@@ -4,98 +4,29 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quire</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23e7e1d5'/><path d='M2 3.5h12M2 7.5h9M2 11.5h7' stroke='%231c1915' stroke-width='1'/></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23f5f5f7'/><rect x='3' y='4' width='10' height='8' fill='%23ffffff' stroke='%231d1d1f'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,640&family=IBM+Plex+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;560&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="quire main mode-sql">
-  <div class="folio">
-    <span>KVDB-ELHADJI-001</span>
-    <span>4096-byte pages</span>
+<main>
+  <h1>Quire</h1>
+  <p class="desc">INT64 and STRING rows in one file. A run is one transaction.</p>
+  <p class="meta" id="db-path">loading…</p>
+  <div id="schema" class="schema"><p class="label">No tables yet.</p></div>
+  <div class="bar">
+    <div id="snippets" class="snippets"></div>
+    <button type="button" class="text" id="clear-btn">Clear</button>
+    <button type="button" class="run" id="run-btn">Run</button>
   </div>
-
-  <header class="mast">
-    <p class="mark">Quire</p>
-    <h1>Query</h1>
-    <p class="path" id="db-path">loading…</p>
-    <p class="dek">INT64 and STRING. Keys keep typed order. A run is one transaction; a failed statement rolls the batch back.</p>
-  </header>
-
-  <aside class="rail">
-    <div class="rail-head">
-      <h2>Tables</h2>
-      <button type="button" class="text-btn" id="refresh-tables">reload</button>
-    </div>
-    <div id="table-list" class="table-list"><p class="muted">No tables yet.</p></div>
-
-    <h2 class="rail-h">Indexes</h2>
-    <div id="index-picker" class="idx-picker"><p class="muted">No indexes yet.</p></div>
-
-    <h2 class="rail-h rail-h-late">Statements</h2>
-    <div class="snippets" id="snippets"></div>
-
-    <h2 class="rail-h">File</h2>
-    <dl class="stats" id="stats">
-      <div><dt>pages</dt><dd id="s-pages">–</dd></div>
-      <div><dt>free</dt><dd id="s-free">–</dd></div>
-      <div><dt>version</dt><dd id="s-version">–</dd></div>
-      <div><dt>size</dt><dd id="s-size">–</dd></div>
-    </dl>
-  </aside>
-
-  <section class="query">
-    <div class="query-bar">
-      <div class="tabs" id="tabs"></div>
-      <div class="query-actions">
-        <span class="hint">ctrl+enter</span>
-        <button type="button" class="text-btn" id="clear-btn">clear</button>
-        <button type="button" class="run" id="run-btn">run</button>
-      </div>
-    </div>
-    <div class="editor-wrap">
-      <div class="gutter" id="gutter">1</div>
-      <textarea id="editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="SELECT name, age FROM users
-WHERE age BETWEEN 30 AND 60
-ORDER BY age DESC;"></textarea>
-    </div>
-    <div class="ran">
-      <span class="ran-label">Ran</span>
-      <div class="history" id="history"></div>
-    </div>
-  </section>
-
-  <section class="rows">
-    <div class="rows-bar">
-      <h2 id="index-title">Rows</h2>
-      <p class="muted" id="index-meta"></p>
-      <div class="view-switch" id="view-switch">
-        <button type="button" class="tab active" data-view="sql">Rows</button>
-        <button type="button" class="tab" data-view="indexes">Keys</button>
-        <button type="button" class="tab" data-view="pages">Pages</button>
-      </div>
-    </div>
-    <div id="results" class="results">
-      <div class="empty">
-        <p>No rows yet.</p>
-        <p class="muted">SELECT, INSERT, UPSERT, UPDATE, DELETE, EXPLAIN, SHOW, DESCRIBE. LIKE 'prefix%' becomes an index bound.</p>
-      </div>
-    </div>
-    <section class="panel" id="index-panel">
-      <div id="index-body" class="panel-body"><p class="muted">Open an index in the catalog. Keys are ordered byte-wise, with the 4-byte prefix first.</p></div>
-    </section>
-  </section>
-
-  <aside class="pages" id="page-panel">
-    <h2>Pages</h2>
-    <p class="dek">Page 0 is the master page: sig, root, used, version, freelist head and tail. It is rewritten last on commit.</p>
-    <dl class="summary" id="page-summary"></dl>
-    <p class="focus-line" id="page-focus">page 0 · master</p>
-    <div id="page-body" class="strip"><p class="muted">Reading the file…</p></div>
-  </aside>
-</div>
+  <textarea id="editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="SELECT name, age FROM users WHERE age BETWEEN 30 AND 60 ORDER BY age DESC;"></textarea>
+  <p class="meta" id="history"></p>
+  <p class="meta" id="pages">pages</p>
+  <div id="results"></div>
+  <div id="keys"></div>
+</main>
 <script src="app.js"></script>
 </body>
 </html>
