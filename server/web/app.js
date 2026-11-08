@@ -29,7 +29,10 @@
     { label: "Index lookup", sql: "SELECT id, name FROM users WHERE email = 'linus@kernel.org';" },
     { label: "Range scan", sql: "SELECT name, age FROM users WHERE age BETWEEN 30 AND 60 ORDER BY age DESC;" },
     { label: "Update + delete", sql: "UPDATE users SET age = 37 WHERE id = 1;\nDELETE FROM users WHERE age > 70;\nSELECT * FROM users;" },
-    { label: "Schema", sql: "SHOW TABLES;\nDESCRIBE users;" },
+    { label: "Schema", sql: "SHOW TABLES;\nDESCRIBE users;\nSHOW INDEX FROM users;" },
+    { label: "Create an index", sql: "CREATE INDEX ON users (name);\nSELECT id, email FROM users WHERE name = 'ada';" },
+    { label: "Aggregates", sql: "SELECT COUNT(*), MIN(age), MAX(age), SUM(age) FROM users;" },
+    { label: "Explain", sql: "EXPLAIN SELECT name FROM users WHERE email = 'ada@lovelace.io';" },
   ];
 
   const tabs = [{ name: "query 1", sql: "" }];
@@ -39,6 +42,12 @@
   // ---------- helpers ----------
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const fmtBytes = (n) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(2) + " MB";
+  const cellHTML = (v) => v === null || v === undefined
+    ? '<td class="nil">NULL</td>'
+    : `<td class="${typeof v === "number" ? "num" : ""}">${esc(v)}</td>`;
+
+  let indexCatalog = [];
+  let activeIndex = "";
 
   function updateGutter() {
     const lines = editor.value.split("\n").length;
@@ -92,10 +101,20 @@
         const d = document.createElement("div");
         d.className = "table-item";
         const idxCols = new Set(t.indexes.map((i) => i[0]));
+        const pk = t.columns.slice(0, t.pkeys);
+        const links = [`<button type="button" class="idx-link pk" data-cols="${esc(pk.join(","))}">PRIMARY (${esc(pk.join(", "))})</button>`]
+          .concat(t.indexes.map((cols) => `<button type="button" class="idx-link" data-cols="${esc(cols.join(","))}">INDEX (${esc(cols.join(", "))})</button>`));
         d.innerHTML = `<div class="t-name">${esc(t.name)}</div>
           <div class="t-meta">${t.columns.length} columns · ${t.indexes.length} index${t.indexes.length === 1 ? "" : "es"}</div>
           <div class="table-cols">${t.columns.map((c, i) =>
-            `<span class="col-chip ${i < t.pkeys ? "pk" : idxCols.has(c) ? "idx" : ""}" title="${esc(t.types[i])}">${esc(c)}</span>`).join("")}</div>`;
+            `<span class="col-chip ${i < t.pkeys ? "pk" : idxCols.has(c) ? "idx" : ""}" title="${esc(t.types[i])}">${esc(c)}</span>`).join("")}</div>
+          <div class="idx-links">${links.join("")}</div>`;
+        d.querySelectorAll(".idx-link").forEach((b) => {
+          b.onclick = (e) => {
+            e.stopPropagation();
+            loadIndex(t.name, b.dataset.cols.split(",").filter(Boolean));
+          };
+        });
         d.onclick = (e) => {
           if (e.detail === 2) { editor.value = `SELECT * FROM ${t.name} LIMIT 50;`; updateGutter(); run(); }
           else d.classList.toggle("open");
@@ -132,7 +151,7 @@
       wrap.className = "grid-wrap";
       const rows = r.rows || [];
       wrap.innerHTML = `<table class="grid"><thead><tr>${r.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
-        <tbody>${rows.map((row) => `<tr>${row.map((v) => `<td class="${typeof v === "number" ? "num" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        <tbody>${rows.map((row) => `<tr>${row.map(cellHTML).join("")}</tr>`).join("")}</tbody></table>`;
       if (!rows.length) wrap.innerHTML += `<div class="result-msg muted">empty result set</div>`;
       card.appendChild(wrap);
     } else {
@@ -165,6 +184,7 @@
       localStorage.setItem("kvdb.history", JSON.stringify(history));
       renderHistory();
       loadTables(); loadStats();
+      if (document.querySelector(".main").classList.contains("mode-indexes")) loadIndexCatalog();
     } catch (e) {
       results.innerHTML = "";
       results.appendChild(renderError("request failed: " + e.message));
@@ -173,7 +193,76 @@
     }
   }
 
+  function setMode(mode) {
+    const main = document.querySelector(".main");
+    const same = main.classList.contains("mode-" + mode);
+    main.classList.remove("mode-sql", "mode-indexes", "mode-pages");
+    main.classList.add("mode-" + mode);
+    document.querySelectorAll("#view-switch .tab").forEach((b) => {
+      b.classList.toggle("active", b.dataset.view === mode);
+    });
+    const sqlOnly = mode === "sql";
+    runBtn.style.display = sqlOnly ? "" : "none";
+    $("#clear-btn").style.display = sqlOnly ? "" : "none";
+    document.querySelector(".hint").style.display = sqlOnly ? "" : "none";
+    $("#tabs").style.display = sqlOnly ? "flex" : "none";
+    if (!same && mode === "indexes") loadIndexCatalog();
+    if (mode === "pages" && typeof loadPages === "function") loadPages();
+  }
+
+  async function loadIndexCatalog() {
+    const el = $("#index-picker");
+    try {
+      const resp = await fetch("/api/indexes");
+      indexCatalog = await resp.json();
+    } catch (e) {
+      el.innerHTML = '<div class="muted">failed to load indexes</div>';
+      return;
+    }
+    if (!indexCatalog.length) {
+      el.innerHTML = '<div class="muted">No tables yet.</div>';
+      return;
+    }
+    el.innerHTML = "";
+    indexCatalog.forEach((ix) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      const key = ix.table + "|" + ix.columns.join(",");
+      b.className = [ix.kind === "PRIMARY" ? "pk" : "", key === activeIndex ? "active" : ""].filter(Boolean).join(" ");
+      b.textContent = ix.table + " · " + ix.kind + " (" + ix.columns.join(", ") + ")";
+      b.onclick = () => loadIndex(ix.table, ix.columns);
+      el.appendChild(b);
+    });
+  }
+
+  async function loadIndex(table, cols) {
+    activeIndex = table + "|" + cols.join(",");
+    setMode("indexes");
+    $("#index-title").textContent = table;
+    $("#index-meta").textContent = cols.join(", ");
+    const body = $("#index-body");
+    body.innerHTML = '<div class="muted">Loading index…</div>';
+    const q = new URLSearchParams({ table, cols: cols.join(","), limit: "200" });
+    const resp = await fetch("/api/indexes?" + q);
+    if (!resp.ok) {
+      body.innerHTML = `<div class="result-msg err">${esc(await resp.text())}</div>`;
+      return;
+    }
+    const data = await resp.json();
+    const rows = data.rows || [];
+    const head = (data.columns || []).map((c) => `<th>${esc(c)}</th>`).join("");
+    body.innerHTML = `<div class="grid-wrap"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${
+      rows.map((row) => `<tr>${row.map(cellHTML).join("")}</tr>`).join("")
+    }</tbody></table></div><div class="muted">${rows.length} key${rows.length === 1 ? "" : "s"}</div>`;
+    document.querySelectorAll("#index-picker button").forEach((b) => {
+      b.classList.toggle("active", b.textContent.startsWith(table + " · ") && b.textContent.includes("(" + cols.join(", ") + ")"));
+    });
+  }
+
   // ---------- wiring ----------
+  document.querySelectorAll("#view-switch .tab").forEach((b) => {
+    b.onclick = () => setMode(b.dataset.view);
+  });
   runBtn.onclick = run;
   $("#clear-btn").onclick = () => { editor.value = ""; updateGutter(); editor.focus(); };
   $("#refresh-tables").onclick = () => { loadTables(); loadStats(); };

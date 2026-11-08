@@ -36,9 +36,15 @@
     </div>
   </aside>
 
-  <main class="main">
+  <main class="main mode-sql">
     <header class="toolbar">
-      <div class="tabs" id="tabs"></div>
+      <div class="toolbar-left">
+        <div class="view-switch" id="view-switch">
+          <button type="button" class="tab active" data-view="sql">SQL</button>
+          <button type="button" class="tab" data-view="indexes">Indexes</button>
+        </div>
+        <div class="tabs" id="tabs"></div>
+      </div>
       <div class="toolbar-right">
         <span class="hint">Ctrl/⌘ + Enter to run</span>
         <button class="btn ghost" id="clear-btn">Clear</button>
@@ -46,6 +52,7 @@
       </div>
     </header>
 
+    <div class="workspace">
     <section class="editor-wrap">
       <div class="gutter" id="gutter">1</div>
       <textarea id="editor" spellcheck="false" placeholder="-- write SQL here, e.g.
@@ -59,6 +66,18 @@ SELECT * FROM users WHERE age >= 30 LIMIT 20;"></textarea>
         <div class="muted">Each run executes inside one transaction; failures roll back everything.</div>
       </div>
     </section>
+
+    <section class="panel" id="index-panel">
+      <div class="panel-bar">
+        <div>
+          <div class="panel-title" id="index-title">Indexes</div>
+          <div class="muted" id="index-meta">Pick an index to see its ordered keys.</div>
+        </div>
+      </div>
+      <div id="index-picker" class="idx-picker"></div>
+      <div id="index-body" class="panel-body"><div class="muted">Select an index above, or open a table in the sidebar.</div></div>
+    </section>
+    </div>
 
     <footer class="history-bar">
       <span class="section-title-inline">History</span>
