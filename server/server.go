@@ -8,9 +8,12 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/elhadjisall/kvdb/db"
+	"github.com/elhadjisall/kvdb/kv"
 	"github.com/elhadjisall/kvdb/sql"
 )
 
@@ -31,6 +34,8 @@ func New(database *db.DB) *Server {
 	s.mux.Handle("/", http.FileServer(http.FS(static)))
 	s.mux.HandleFunc("/api/query", s.handleQuery)
 	s.mux.HandleFunc("/api/tables", s.handleTables)
+	s.mux.HandleFunc("/api/indexes", s.handleIndexes)
+	s.mux.HandleFunc("/api/pages", s.handlePages)
 	s.mux.HandleFunc("/api/stats", s.handleStats)
 	return s
 }
@@ -75,7 +80,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	results, err := sql.Run(s.db, req.SQL)
+	sess := sql.NewSession(s.db)
+	defer sess.Close()
+	results, err := sess.Exec(req.SQL)
 	resp := queryResponse{Results: results}
 	if results == nil {
 		resp.Results = []*sql.Result{}
@@ -115,6 +122,87 @@ func (s *Server) handleTables(w http.ResponseWriter, r *http.Request) {
 		out = append(out, tableInfo{d.Name, d.Cols, types, d.PKeys, idx})
 	}
 	writeJSON(w, out)
+}
+
+func (s *Server) handleIndexes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET only", http.StatusMethodNotAllowed)
+		return
+	}
+	tx := s.db.BeginRead()
+	defer tx.Rollback()
+	table := r.URL.Query().Get("table")
+	cols := splitCols(r.URL.Query().Get("cols"))
+	if table == "" || len(cols) == 0 {
+		info, err := tx.Indexes(table)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if info == nil {
+			info = []db.IndexInfo{}
+		}
+		writeJSON(w, info)
+		return
+	}
+	limit := 100
+	if q := r.URL.Query().Get("limit"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 0 {
+			http.Error(w, "bad limit", http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+	columns, rows, err := tx.IndexEntries(table, cols, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	out := make([][]any, len(rows))
+	for i, row := range rows {
+		out[i] = make([]any, len(row))
+		for j, v := range row {
+			out[i][j] = v.Any()
+		}
+	}
+	if columns == nil {
+		columns = []string{}
+	}
+	writeJSON(w, map[string]any{"columns": columns, "rows": out})
+}
+
+func splitCols(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (s *Server) handlePages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET only", http.StatusMethodNotAllowed)
+		return
+	}
+	pm := s.db.PageMap()
+	truncated := false
+	const maxPages = 1000
+	if len(pm.Pages) > maxPages {
+		pm.Pages = pm.Pages[:maxPages]
+		truncated = true
+	}
+	writeJSON(w, struct {
+		kv.PageMap
+		Truncated bool `json:"truncated"`
+	}{pm, truncated})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {

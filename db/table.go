@@ -52,6 +52,9 @@ func (db *DB) Close() error { return db.kv.Close() }
 // Stats exposes storage statistics.
 func (db *DB) Stats() kv.Stats { return db.kv.Stats() }
 
+// PageMap classifies the pages of the last committed version.
+func (db *DB) PageMap() kv.PageMap { return db.kv.PageMap() }
+
 // reader abstracts over read-only and read-write transactions.
 type reader interface {
 	Get(key []byte) ([]byte, bool)
