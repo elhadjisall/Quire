@@ -32,12 +32,15 @@ No dependencies outside the standard library.
   snapshot readers; writes are atomic and isolated.
 - **Tables and indexes** – typed columns (`INT64`, `STRING`),
   multi-column primary keys, secondary indexes maintained automatically.
-- **SQL** – `CREATE TABLE`, `INSERT`, `UPSERT`, `SELECT ... WHERE ... ORDER BY ... LIMIT`,
-  `UPDATE`, `DELETE`, `DROP TABLE`, `SHOW TABLES`, `DESCRIBE`. The planner
-  picks a primary key lookup, index scan or range scan from the `WHERE`
-  clause and applies leftover predicates as filters.
+- **SQL** – `CREATE TABLE`, `CREATE INDEX`, `DROP INDEX`, `INSERT`, `UPSERT`,
+  `SELECT` with `WHERE`, `LIKE`, `ORDER BY`, `LIMIT`/`OFFSET`, aggregates
+  (`COUNT`, `SUM`, `MIN`, `MAX`), `UPDATE`, `DELETE`, `EXPLAIN`,
+  `DROP TABLE`, `SHOW TABLES`, `SHOW INDEX`, `DESCRIBE`, and
+  `BEGIN`/`COMMIT`/`ROLLBACK`. The planner picks a primary key lookup,
+  index scan or range scan from the `WHERE` clause, turns a `LIKE 'prefix%'`
+  into index bounds, and sorts in memory when `ORDER BY` is not the scan order.
 - **Web console** – a dependency-free browser UI with a query editor,
-  schema browser, query plans and storage statistics.
+  schema browser, result table, index browser and a page map.
 
 ## Getting started
 
@@ -54,6 +57,10 @@ go build ./cmd/kvdb
 ./kvdb serve data/app.db
 ```
 
+`make build` writes `bin/kvdb`. `make serve` builds and starts the console
+on http://localhost:7070 against `data/app.db`. In the shell, `BEGIN` holds
+the transaction open (the prompt changes to `kvdb*>`) until `COMMIT` or `ROLLBACK`.
+
 ## SQL dialect
 
 ```sql
@@ -67,7 +74,13 @@ SELECT name, age FROM users WHERE age BETWEEN 30 AND 60 ORDER BY age DESC LIMIT 
 SELECT * FROM users WHERE email = 'ada@x.io';          -- index scan on (email)
 UPDATE users SET age = 38 WHERE id = 1;
 DELETE FROM users WHERE age > 70;
-SHOW TABLES; DESCRIBE users; DROP TABLE users;
+CREATE INDEX ON users (name);
+DROP INDEX ON users (name);
+SELECT COUNT(*), MIN(age), MAX(age), SUM(age) FROM users WHERE name LIKE 'a%';
+SELECT name FROM users ORDER BY name LIMIT 10 OFFSET 5;
+EXPLAIN SELECT * FROM users WHERE email = 'ada@x.io';
+SHOW TABLES; SHOW INDEX FROM users; DESCRIBE users; DROP TABLE users;
+BEGIN; INSERT INTO users VALUES (9, 'edsger', 'edsger@utexas.edu', 70); COMMIT;
 ```
 
 Every call to `kvdb exec`, every shell input and every console run executes

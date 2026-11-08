@@ -3,13 +3,16 @@
 // Supported statements:
 //
 //	CREATE TABLE t (a INT64, b STRING, PRIMARY KEY (a), INDEX (b));
+//	CREATE INDEX [name] ON t (b);  DROP INDEX ON t (b);
 //	DROP TABLE t;
 //	INSERT INTO t (a, b) VALUES (1, 'x'), (2, 'y');
 //	UPSERT INTO t (a, b) VALUES (1, 'z');
-//	SELECT a, b FROM t WHERE a >= 1 AND a < 10 LIMIT 5;
+//	SELECT COUNT(*), MIN(a) FROM t WHERE b LIKE 'a%' ORDER BY a LIMIT 5 OFFSET 1;
+//	EXPLAIN SELECT a FROM t WHERE a = 1;
 //	UPDATE t SET b = 'w' WHERE a = 1;
 //	DELETE FROM t WHERE a = 1;
-//	SHOW TABLES;  DESCRIBE t;
+//	BEGIN; COMMIT; ROLLBACK;
+//	SHOW TABLES; SHOW INDEX FROM t; DESCRIBE t;
 package sql
 
 import (
